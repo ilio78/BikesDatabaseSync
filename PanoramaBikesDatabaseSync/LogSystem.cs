@@ -14,6 +14,8 @@ namespace PanoramaBikesDatabaseSync
             
             Console.WriteLine(msg);
 
+            //comment by George
+
             if (!isError)
                 return;
 

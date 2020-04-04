@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Configuration;
 using System.IO;
+using System.Globalization;
 
 namespace PanoramaBikesDatabaseSync
 {
@@ -18,7 +19,8 @@ namespace PanoramaBikesDatabaseSync
 
         public List<PrestaProduct> ProductMappings;
 
-        public Dictionary<string, int> ReferenceQuantityMap;
+        // Key is Product Code - Value is Tuple : Quantity & Price
+        public Dictionary<string, Tuple<int,float>> ReferenceQuantityMap;
 
         public string ExecuteUpdateURL;
         public string ConfigLoadURL;
@@ -27,7 +29,6 @@ namespace PanoramaBikesDatabaseSync
         public string InvalidCharacters;
         public List<int> DebugProductIds;
         private string ApothikiFile;
-
 
         public bool LoadConfiguration()
         {
@@ -52,7 +53,7 @@ namespace PanoramaBikesDatabaseSync
                 LogSystem.Debug("Debug Mode - Only these product Ids will be parsed: " + string.Join(";", DebugProductIds.ConvertAll(id => id.ToString())));
             }
             
-            LogSystem.Log("Execute Update URL: " + ExecuteUpdateURL);
+            LogSystem.Log("Execute Update URL: " + ExecuteUpdateURL ?? "N/A");
             LogSystem.Log("Config Load From URL: " + ConfigLoadURL);
             LogSystem.Log("Invalid Characters: " + InvalidCharacters);
             LogSystem.Log("SyncKey1: " + SyncKey1);
@@ -67,32 +68,32 @@ namespace PanoramaBikesDatabaseSync
 
             LogSystem.Log("Parsing Apothiki File...");
 
-            ReferenceQuantityMap = new Dictionary<string, int>();
+            ReferenceQuantityMap = new Dictionary<string, Tuple<int, float>>();
 
             StreamReader file = new StreamReader(ApothikiFile);
            
-            //First line are headers!
+            //First line holds the headers!
             string line = file.ReadLine();
             while ((line = file.ReadLine()) != null)
             {
-                List<string> data = line.Replace(",00","").Split(';').ToList();
+                List<string> data = line.Split(';').ToList();
 
-                if (data.Count != 2)
+                if (data.Count != 3)
                     continue;
 
-                int quantity = 0;
-                if (!int.TryParse(data[1], out quantity))
+                if (!int.TryParse(data[1].Replace(",00", ""), out int quantity))
                     continue;
 
-                ReferenceQuantityMap[data[0]] = quantity;
+                data[2] = data[2].Replace(',', '.');
+                if (!float.TryParse(data[2], NumberStyles.Any, CultureInfo.InvariantCulture, out float price))
+                    continue;
+
+                ReferenceQuantityMap[data[0]] = new Tuple<int, float>(quantity, price);
             }
 
             LogSystem.Log(string.Format("Products found: {0}", ReferenceQuantityMap.Count));
 
             return true;
         }
-
-
-
     }
 }

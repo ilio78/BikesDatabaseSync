@@ -25,16 +25,18 @@ namespace PanoramaBikesDatabaseSync
 
             LogSystem.Log("GET request to : " + configLoadUrl + " ...");
 
-            HttpWebRequest request = (HttpWebRequest)HttpWebRequest.Create(configLoadUrl);
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(configLoadUrl);
             request.Method = "GET";
             String dataReceived = String.Empty;
             using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
             {
-                Stream dataStream = response.GetResponseStream();
-                StreamReader reader = new StreamReader(dataStream);
-                dataReceived = reader.ReadToEnd();
-                reader.Close();
-                dataStream.Close();
+                using (Stream dataStream = response.GetResponseStream())
+                {
+                    using (StreamReader reader = new StreamReader(dataStream))
+                    {
+                        dataReceived = reader.ReadToEnd();
+                    }
+                }
             }
 
             LogSystem.Log("Request completed!");
@@ -105,16 +107,13 @@ namespace PanoramaBikesDatabaseSync
             LogSystem.Log();
             LogSystem.Log("Computing product quantities...");
             
-            //This updates the
-            //Dictionary<int, int> panora_product_Quantities = new Dictionary<int,int>();
             Dictionary<int, int> panora_stock_available_ProductQuantities = new Dictionary<int,int>();
             Dictionary<int, int> panora_stock_available_AttributeQuantities = new Dictionary<int,int>();            
 
             for (int i = 0; i < gc.ProductMappings.Count; i++)
             {
-                int quantity = -1;
 
-                if (!gc.ReferenceQuantityMap.TryGetValue(gc.ProductMappings[i].ReferenceCode, out quantity))
+                if (!gc.ReferenceQuantityMap.TryGetValue(gc.ProductMappings[i].ReferenceCode, out Tuple<int, float> productInfo))
                 {
                     string itemConcerned = "productId " + gc.ProductMappings[i].Id_Product.ToString();
                     if (gc.ProductMappings[i].Id_Product_Attribute > 0)
@@ -125,32 +124,21 @@ namespace PanoramaBikesDatabaseSync
                     continue;
                 }
 
-                if (quantity < 0)
+                // Check Quantity...
+                if (productInfo.Item1 < 0)
                 {
                     LogSystem.Error(string.Format("For reference code {0} in warehouse file quantity is less than 0!",
                                     gc.ProductMappings[i].ReferenceCode));
                     continue;
                 }
                 
-                /* no longer applies!
-                if (gc.ProductMappings[i].Id_Product_Attribute == 0)
-                {
-                    // This product does not have any children...thus we update only the panora_product table
-                    panora_product_Quantities.Add(gc.ProductMappings[i].Id_Product, quantity);                        
-                    continue;
-                }
-                */
-                  
-                  
                 //If there is an attribute use it to update the other table...
                 if (gc.ProductMappings[i].Id_Product_Attribute > 0)
-                    panora_stock_available_AttributeQuantities.Add(gc.ProductMappings[i].Id_Product_Attribute, quantity);
+                    panora_stock_available_AttributeQuantities.Add(gc.ProductMappings[i].Id_Product_Attribute, productInfo.Item1);
                     
                 // The quantity of the whole family is the sum of the quantities of the children!                    
-                int productQuantity = 0;
-
-                panora_stock_available_ProductQuantities.TryGetValue(gc.ProductMappings[i].Id_Product, out productQuantity);
-                productQuantity += quantity;
+                panora_stock_available_ProductQuantities.TryGetValue(gc.ProductMappings[i].Id_Product, out int productQuantity);
+                productQuantity += productInfo.Item1;
                 panora_stock_available_ProductQuantities[gc.ProductMappings[i].Id_Product] = productQuantity;                                        
             }
 
@@ -181,15 +169,6 @@ namespace PanoramaBikesDatabaseSync
                     file.WriteLine(string.Format("update panora_stock_available set quantity = {0} where id_product_attribute = 0 and id_product = {1}", 
                                                     itemQuantity.Value, itemQuantity.Key));
                 }
-                
-                /*
-                foreach (KeyValuePair<int, int> itemQuantity in panora_product_Quantities)
-                {
-                    panora_product.AppendFormat("{0},{1};", itemQuantity.Value, itemQuantity.Key);
-                    file.WriteLine(string.Format("update panora_product set quantity = {0} where id_product= {1}", 
-                                                    itemQuantity.Value, itemQuantity.Key));
-                }
-                */
 
                 file.WriteLine("-- Completed SQL update commands:");
             }
@@ -197,15 +176,18 @@ namespace PanoramaBikesDatabaseSync
             LogSystem.Log("Finished 'combinations' SQL commands.");
             LogSystem.Log();           
 
+            if (string.IsNullOrWhiteSpace(gc.ExecuteUpdateURL))
+            {
+                LogSystem.Log("ExecuteUpdateURL is null - Website DB will not be updated!");
+                LogSystem.Log();
+                EndMessage();
+                return;
+            }
+
             request = (HttpWebRequest)HttpWebRequest.Create(gc.ExecuteUpdateURL);
             request.Method = "POST";
             request.UserAgent = "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/15.0.874.121 Safari/535.2";
             request.ContentType = "application/x-www-form-urlencoded";
-
-            /*               
-                $panora_stock_available1 = $_POST["valueset_panora_stock_available1"];
-                $panora_stock_available2 = $_POST["valueset_panora_stock_available2"];            
-             */
 
             string postData =
                 String.Format("SyncKey1={0}&SyncKey2={1}&valueset_panora_stock_available1={2}&valueset_panora_stock_available2={3}",
@@ -218,29 +200,35 @@ namespace PanoramaBikesDatabaseSync
 
             using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
             {
-                Stream dataStream = response.GetResponseStream();
-                StreamReader reader = new StreamReader(dataStream);
-                dataReceived = reader.ReadToEnd();
-                LogSystem.Debug("Post response start:");
-                LogSystem.Debug(dataReceived);
-                LogSystem.Debug("Post response end."); 
-                reader.Close();
-                dataStream.Close();                
+                using (Stream dataStream = response.GetResponseStream())
+                {
+                    using (StreamReader reader = new StreamReader(dataStream))
+                    {
+                        dataReceived = reader.ReadToEnd();
+                        LogSystem.Debug("Post response start:");
+                        LogSystem.Debug(dataReceived);
+                        LogSystem.Debug("Post response end.");
+                    }
+                }                
             }
-                                                                                  
+
             LogSystem.Log("Finished DB Update");
             LogSystem.Log();
-            
+            EndMessage();
+        }
+
+        static void EndMessage()
+        {
+
             LogSystem.Log();
             LogSystem.Debug("End of running Panorama Bikes Database Sync");
             LogSystem.Debug("===========================================");
             LogSystem.Log();
 
-
-
             Console.ReadLine();
         }
 
-              
     }
+
+  
 }

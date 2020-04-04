@@ -10,17 +10,20 @@ namespace PanoramaBikesDatabaseSync
 {
     public class GlobalConfiguration
     {
-        public class PrestaProduct
+        public class WebsiteProduct
         {
             public int Id_Product = 0;            
             public int Id_Product_Attribute = 0;            
             public string ReferenceCode;
+            public float ProductPrice;
+            public float PriceReduction;
+            public string ReductionType;
         }
 
-        public List<PrestaProduct> ProductMappings;
+        public List<WebsiteProduct> WebsiteProductList;
 
         // Key is Product Code - Value is Tuple : Quantity & Price
-        public Dictionary<string, Tuple<int,float>> ReferenceQuantityMap;
+        public Dictionary<string, Tuple<int,float>> StoreProductMap;
 
         public string ExecuteUpdateURL;
         public string ConfigLoadURL;
@@ -32,7 +35,7 @@ namespace PanoramaBikesDatabaseSync
 
         public bool LoadConfiguration()
         {
-            ProductMappings = new List<PrestaProduct>();                                               
+            WebsiteProductList = new List<WebsiteProduct>();                                               
             
             LogSystem.Log("Loading Configuration...");
 
@@ -68,7 +71,7 @@ namespace PanoramaBikesDatabaseSync
 
             LogSystem.Log("Parsing Apothiki File...");
 
-            ReferenceQuantityMap = new Dictionary<string, Tuple<int, float>>();
+            StoreProductMap = new Dictionary<string, Tuple<int, float>>();
 
             StreamReader file = new StreamReader(ApothikiFile);
            
@@ -88,12 +91,24 @@ namespace PanoramaBikesDatabaseSync
                 if (!float.TryParse(data[2], NumberStyles.Any, CultureInfo.InvariantCulture, out float price))
                     continue;
 
-                ReferenceQuantityMap[data[0]] = new Tuple<int, float>(quantity, price);
+                StoreProductMap[data[0]] = new Tuple<int, float>(quantity, price);
             }
 
-            LogSystem.Log(string.Format("Products found: {0}", ReferenceQuantityMap.Count));
+            LogSystem.Log(string.Format("Products found: {0}", StoreProductMap.Count));
 
             return true;
+        }
+
+        public float GetSafeFloat(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return 0;
+
+            text = text.Replace(',', '.');
+            if (!float.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out float returnVal))
+                returnVal = 0;
+
+            return returnVal;
         }
     }
 }

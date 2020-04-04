@@ -5,6 +5,8 @@ using System.Text;
 using System.Configuration;
 using System.IO;
 using System.Net;
+using System.Globalization;
+using static PanoramaBikesDatabaseSync.GlobalConfiguration;
 
 namespace PanoramaBikesDatabaseSync
 {
@@ -46,7 +48,7 @@ namespace PanoramaBikesDatabaseSync
             LogSystem.Log("Products retrieved: " + dataRows.Count);
             LogSystem.Log("Parsing data...");
             LogSystem.Log("Expected columns are:");
-            LogSystem.Log("Id_Product, Reference, Id_Product_Attribute, Reference_Product_Attribute");
+            LogSystem.Log("Id_Product, Reference, Id_Product_Attribute, Reference_Product_Attribute, ProductPrice, PriceReduction, ReductionType");
             LogSystem.Log("------------------------------------------------------------------------");
 
             foreach (string row in dataRows)
@@ -56,16 +58,22 @@ namespace PanoramaBikesDatabaseSync
 
                 List<string> fields = row.Split(';').ToList();
 
-                //512;;629;xxxx is OK
+                /*
+                Valid Formats:
+                2847;40280504018GR1BR;2771;40280504618GR1460BR;379.000000;40.000000;amount
+                3563;73-40218;;;10.000000;;
+                2955;91-1101635;2803;91-1101635Yellow FluoM;49.900000;;
+                119;1100518002;10;01100518002L;51.000000;0.500000;percentage
+                */
 
-                if (fields.Count != 4)
+                if (fields.Count != 7)
                 {
                     //if this happens something is really wrong!
                     LogSystem.Error("Failed to detect fields for: " + row);
                     continue;
                 }
 
-                GlobalConfiguration.PrestaProduct productMap = new GlobalConfiguration.PrestaProduct();
+                GlobalConfiguration.WebsiteProduct productMap = new GlobalConfiguration.WebsiteProduct();
                 
                 if (!int.TryParse(fields[0], out productMap.Id_Product))
                 {
@@ -86,9 +94,14 @@ namespace PanoramaBikesDatabaseSync
                 }
                 else
                 {
-                    //if not product attribute Id is found then we need a reference code
+                    //if product attribute Id is not found then we need a reference code
                     productMap.ReferenceCode = fields[1];
                 }
+
+                // Regardless of the above for now also extract price info :
+                productMap.ProductPrice = gc.GetSafeFloat(fields[4]);
+                productMap.PriceReduction = gc.GetSafeFloat(fields[5]);
+                productMap.ReductionType = fields[6];
 
                 if (string.IsNullOrWhiteSpace(productMap.ReferenceCode))
                 {
@@ -101,7 +114,7 @@ namespace PanoramaBikesDatabaseSync
                     LogSystem.Error("Reference code contains invalid characters: " + row);
                     continue;
                 }                
-                gc.ProductMappings.Add(productMap);
+                gc.WebsiteProductList.Add(productMap);
             }
 
             LogSystem.Log();
@@ -110,36 +123,40 @@ namespace PanoramaBikesDatabaseSync
             Dictionary<int, int> panora_stock_available_ProductQuantities = new Dictionary<int,int>();
             Dictionary<int, int> panora_stock_available_AttributeQuantities = new Dictionary<int,int>();            
 
-            for (int i = 0; i < gc.ProductMappings.Count; i++)
+            for (int i = 0; i < gc.WebsiteProductList.Count; i++)
             {
+                //For each website product find the info from the store structure.
+                WebsiteProduct wp = gc.WebsiteProductList[i];
 
-                if (!gc.ReferenceQuantityMap.TryGetValue(gc.ProductMappings[i].ReferenceCode, out Tuple<int, float> productInfo))
+                if (!gc.StoreProductMap.TryGetValue(wp.ReferenceCode, out Tuple<int, float> storeProduct))
                 {
-                    string itemConcerned = "productId " + gc.ProductMappings[i].Id_Product.ToString();
-                    if (gc.ProductMappings[i].Id_Product_Attribute > 0)
-                        itemConcerned = "productAttributeId " + gc.ProductMappings[i].Id_Product_Attribute;
+                    string itemConcerned = "productId " + wp.Id_Product.ToString();
+                    if (wp.Id_Product_Attribute > 0)
+                        itemConcerned = "productAttributeId " + wp.Id_Product_Attribute;
 
-                    LogSystem.Error(string.Format("Reference code {0} for {1} was not found in warehouse file.",
-                                    gc.ProductMappings[i].ReferenceCode, itemConcerned));
+                    LogSystem.Error(string.Format("Reference code {0} for {1} was not found in the warehouse file.",
+                                    wp.ReferenceCode, itemConcerned));
                     continue;
                 }
 
                 // Check Quantity...
-                if (productInfo.Item1 < 0)
+                if (storeProduct.Item1 < 0)
                 {
                     LogSystem.Error(string.Format("For reference code {0} in warehouse file quantity is less than 0!",
-                                    gc.ProductMappings[i].ReferenceCode));
+                                    wp.ReferenceCode));
                     continue;
                 }
                 
                 //If there is an attribute use it to update the other table...
-                if (gc.ProductMappings[i].Id_Product_Attribute > 0)
-                    panora_stock_available_AttributeQuantities.Add(gc.ProductMappings[i].Id_Product_Attribute, productInfo.Item1);
+                if (wp.Id_Product_Attribute > 0)
+                    panora_stock_available_AttributeQuantities.Add(wp.Id_Product_Attribute, storeProduct.Item1);
                     
                 // The quantity of the whole family is the sum of the quantities of the children!                    
-                panora_stock_available_ProductQuantities.TryGetValue(gc.ProductMappings[i].Id_Product, out int productQuantity);
-                productQuantity += productInfo.Item1;
-                panora_stock_available_ProductQuantities[gc.ProductMappings[i].Id_Product] = productQuantity;                                        
+                panora_stock_available_ProductQuantities.TryGetValue(wp.Id_Product, out int productQuantity);
+                productQuantity += storeProduct.Item1;
+                panora_stock_available_ProductQuantities[wp.Id_Product] = productQuantity;
+
+                LogSystem.Price(wp.ReferenceCode, wp.Id_Product, storeProduct.Item2, wp.ProductPrice, wp.PriceReduction, wp.ReductionType);
             }
 
             LogSystem.Log("Quantities computed!");
@@ -194,9 +211,10 @@ namespace PanoramaBikesDatabaseSync
                     gc.SyncKey1, gc.SyncKey2, panora_stock_available1.ToString(), panora_stock_available2.ToString());            
             byte[] byteArray = Encoding.UTF8.GetBytes(postData);
             request.ContentLength = byteArray.Length;
-            Stream datastream = request.GetRequestStream();
-            datastream.Write(byteArray, 0, byteArray.Length);
-            datastream.Close();
+            using (Stream datastream = request.GetRequestStream())
+            {
+                datastream.Write(byteArray, 0, byteArray.Length);
+            }
 
             using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
             {

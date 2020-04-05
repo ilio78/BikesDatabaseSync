@@ -121,7 +121,9 @@ namespace PanoramaBikesDatabaseSync
             LogSystem.Log("Computing product quantities...");
             
             Dictionary<int, int> panora_stock_available_ProductQuantities = new Dictionary<int,int>();
-            Dictionary<int, int> panora_stock_available_AttributeQuantities = new Dictionary<int,int>();            
+            Dictionary<int, int> panora_stock_available_AttributeQuantities = new Dictionary<int,int>();
+
+            LogSystem.PriceStart();
 
             for (int i = 0; i < gc.WebsiteProductList.Count; i++)
             {
@@ -158,6 +160,8 @@ namespace PanoramaBikesDatabaseSync
 
                 LogSystem.Price(wp.ReferenceCode, wp.Id_Product, storeProduct.Item2, wp.ProductPrice, wp.PriceReduction, wp.ReductionType);
             }
+
+            LogSystem.PriceEnd();
 
             LogSystem.Log("Quantities computed!");
             LogSystem.Log();
